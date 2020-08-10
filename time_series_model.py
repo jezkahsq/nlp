@@ -10,25 +10,31 @@ import pandas as pd
 import matplotlib.pylab as plt
 from arch.unitroot import ADF
 import statsmodels.api as sm
-from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.api import SARIMAX
 from sklearn.externals import joblib
 import itertools
 import scipy.stats as stats
+from statsmodels.stats.diagnostic import acorr_ljungbox
 
 plt.rcParams['font.sans-serif']=['SimHei']
 plt.rcParams['axes.unicode_minus'] =False
 
 class Model:
     
-    def __init__(self, df, period, p_max, q_max, d_max, forecast_num):
+    def __init__(self, df, period, p_max, q_max, d_max, forecast_num, pdq_, PDQ_):
         self.df = df
         self.period = period
         self.p_max = p_max
         self.q_max = q_max
         self.d_max = d_max
         self.forecast_num = forecast_num
+        self.pdq_ = pdq_
+        self.PDQ_ = PDQ_
     
     def diff_process(self):
+        self.p_value = acorr_ljungbox(self.df.iloc[:,0], lags=1) 
+        print ('白噪声检验p值：', self.p_value[1], '\n') #大于0.05认为是白噪声，即序列在时间上不具有相关性
+        
         self.ADF_value = ADF(self.df.iloc[:,0]) #p值为0小于0.05认为是平稳的(单位根检验)
     
         self.diff_period = self.df.iloc[:,0].diff(self.period) #季节性差分
@@ -89,7 +95,7 @@ class Model:
     def params_select(self):
         self.p = range(0, self.p_max)
         self.q = range(0, self.q_max)
-        d = range(1, self.d_max)
+        d = range(0, self.d_max)
         # Generate all different combinations of p, q and q triplets
         pdq = list(itertools.product(self.p, d, self.q))
         # Generate all different combinations of seasonal p, q and q triplets
@@ -98,19 +104,17 @@ class Model:
         aic_value = pd.DataFrame()
         for i, param in enumerate(pdq):
             for param_seasonal in seasonal_pdq:
-                model = sm.tsa.statespace.SARIMAX(self.df.iloc[:,0],
-                                                  order = param,
-                                                  seasonal_order = param_seasonal,
-                                                  enforce_stationarity = False,
-                                                  enforce_invertibility = False)
-                results = model.fit()
+                model = SARIMAX(self.df.iloc[:,0],
+                                order = param,
+                                seasonal_order = param_seasonal)
+                results = model.fit(low_memory=True)
                 print('SARIMA{}x{} - AIC:{}'.format(param, param_seasonal, results.aic))
                 param_list = [[param, param_seasonal, results.aic]]
                 aic_value_ = pd.DataFrame(param_list, columns = ['param', 'param_seasonal', 'aic'])
                 aic_value = pd.concat([aic_value, aic_value_])
                     
         index_list = []
-        for i in range(self.p_max * self.q_max * self.p_max * self.q_max):
+        for i in range(self.p_max * self.q_max * self.p_max * self.q_max*self.d_max*self.d_max):
             index_list.append(i)
         aic_value.index = index_list 
         
@@ -121,7 +125,7 @@ class Model:
         self.param_seasonal = a[0][1]
 
     def sarima(self):
-        model = SARIMAX(self.df.iloc[:,0], order = self.param, seasonal_order = self.param_seasonal)#与上一句等价
+        model = SARIMAX(self.df.iloc[:,0], order = self.param, seasonal_order = self.param_seasonal, low_memory=True)#与上一句等价
         print('the best parameters: SARIMA{}x{}'.format(self.param, self.param_seasonal))
         self.results = model.fit()
         #joblib.dump(results, f'C:\\Users\\Administrator\\Desktop\\SARIMA模型.pkl')
@@ -132,7 +136,19 @@ class Model:
         self.df.iloc[:,0].plot(ax = ax)
         plt.legend(['y_pred', 'y_true'])
         plt.show()
-        return self.results
+    
+    def sarima_(self):
+        model = SARIMAX(self.df.iloc[:,0], order = self.pdq_, seasonal_order = self.PDQ_)#与上一句等价
+        print('the parameters: SARIMA{}x{}'.format(self.pdq_, self.PDQ_), '\n')
+        self.results = model.fit()
+        #joblib.dump(results, f'C:\\Users\\Administrator\\Desktop\\SARIMA模型.pkl')
+        self.predict_ = self.results.forecast(self.forecast_num)
+
+        fig, ax = plt.subplots(figsize=(30,6))
+        ax = self.predict_.plot(ax = ax)
+        self.df.iloc[:,0].plot(ax = ax)
+        plt.legend(['y_pred', 'y_true'])
+        plt.show()
     
     def model_eval(self):
         #计算残差
