@@ -16,6 +16,7 @@ import scipy.stats as stats
 import statsmodels.tsa.stattools as st  
 from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tsa.stattools import adfuller
+import numpy as np
 
 plt.rcParams['font.sans-serif']=['SimHei']
 plt.rcParams['axes.unicode_minus'] =False
@@ -30,13 +31,13 @@ class Arima:
     
     def diff_process(self):
         
-        self.p_value = acorr_ljungbox(self.df.iloc[:,0], lags=1) 
+        self.p_value = acorr_ljungbox(self.df.iloc[:,1], lags=1) 
         print ('白噪声检验p值：', self.p_value[1], '\n') #大于0.05认为是白噪声，即序列在时间上不具有相关性
         #self.ADF_value = ADF(self.df.iloc[:,0]) #p值为0小于0.05认为是平稳的(单位根检验)
         '''
         单位根检验按p值判断是否平稳，否则一直作差分直到序列平稳
         '''
-        self.diff_ = self.df.iloc[:,0]
+        self.diff_ = self.df.iloc[:,1]
         self.ADF_value = adfuller(self.diff_, autolag='AIC')
         self.i = 0
         while self.ADF_value[1] >= 0.05:
@@ -50,7 +51,7 @@ class Arima:
         
         fig = plt.figure(figsize=(20,6))
         ax1 = fig.add_subplot(211) #原始数据图
-        ax1.plot(self.df.iloc[:,0])
+        ax1.plot(self.df.iloc[:,1])
         ax2 = fig.add_subplot(212) #再一次差分之后 平稳
         ax2.plot(self.diff_)
         plt.show()
@@ -59,11 +60,11 @@ class Arima:
         
         fig = plt.figure(figsize=(12,8))
         ax1 = fig.add_subplot(211)
-        fig = sm.graphics.tsa.plot_acf(self.df.iloc[:,0], lags = 100, ax = ax1)
+        fig = sm.graphics.tsa.plot_acf(self.df.iloc[:,1], lags = 100, ax = ax1)
         ax1.xaxis.set_ticks_position('bottom')
         fig.tight_layout()
         ax2 = fig.add_subplot(212)
-        fig = sm.graphics.tsa.plot_pacf(self.df.iloc[:,0], lags = 100, ax = ax2)
+        fig = sm.graphics.tsa.plot_pacf(self.df.iloc[:,1], lags = 100, ax = ax2)
         ax2.xaxis.set_ticks_position('bottom')
         fig.tight_layout()
         plt.show()
@@ -93,17 +94,23 @@ class Arima:
         print('the best parameters: ARIMA{}'.format(self.order.bic_min_order))
 
     def arima(self):
-        model = ARIMA(self.df.iloc[:,0], order = self.order.bic_min_order)
+        model = ARIMA(self.df.iloc[:,1], order = self.order.bic_min_order)
         self.results = model.fit()
         #joblib.dump(results, f'C:\\Users\\Administrator\\Desktop\\ARIMA模型.pkl')
         self.predict_ = self.results.forecast(self.forecast_num)
 
         fig, ax = plt.subplots(figsize=(30,6))
-        ax = pd.DataFrame(self.predict_[0]).plot(ax = ax)
-        self.df.iloc[:,0].plot(ax = ax)
+        predict_and_df = np.concatenate((np.array(self.df.iloc[:,1]), self.predict_[0]))
+        dt = {'x':[], 'y':[]}
+        for i in range(len(predict_and_df)):
+            dt['x'].append(i)
+            dt['y'].append(predict_and_df[i])
+            
+        plot_dt = pd.DataFrame(dt, columns = ['x', 'y'])
+        plt.plot(plot_dt.x[:len(self.df.iloc[:,1])], plot_dt.y[:len(self.df.iloc[:,1])], color = 'red')
+        plt.plot(plot_dt.x[len(self.df.iloc[:,1]):], plot_dt.y[len(self.df.iloc[:,1]):], color = 'green')   
         plt.legend(['y_pred', 'y_true'])
         plt.show()
-        return self.results
     
     def model_eval(self):
         #计算残差
